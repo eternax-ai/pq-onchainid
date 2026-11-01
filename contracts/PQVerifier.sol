@@ -22,6 +22,10 @@ interface IMLDSA {
 /// @title Thin wrappers around EternaX PQ verify precompiles
 /// @dev Both SLH-DSA and ML-DSA forward to native host functions.
 library PQVerifier {
+    /// @dev secp256k1 curve order divided by two (EIP-2 upper bound for s).
+    uint256 private constant SECP256K1_HALF_ORDER =
+        0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
+
     /// @notice Verify SLH-DSA-SHAKE-128s over `message` with 32-byte public key.
     function verifySlhDsa(bytes32 pk, bytes memory message, bytes memory signature)
         internal
@@ -58,7 +62,9 @@ library PQVerifier {
     }
 
     /// @notice ECDSA recover of Ethereum signed message over `digest` (32-byte hash).
-    /// @dev `signature` is 65 bytes: r || s || v
+    /// @dev `signature` is 65 bytes: r || s || v. Returns address(0) unless v is 27 or 28
+    ///      and s is in the lower half of the curve order (EIP-2): otherwise the same
+    ///      signature has a second encoding, and claim revocation is keyed on the bytes.
     function recoverEcdsa(bytes32 digest, bytes memory signature) internal pure returns (address) {
         require(signature.length == 65, "ecdsa: bad sig len");
 
@@ -70,8 +76,11 @@ library PQVerifier {
             s := mload(add(signature, 0x40))
             v := byte(0, mload(add(signature, 0x60)))
         }
-        if (v < 27) {
-            v += 27;
+        if (v != 27 && v != 28) {
+            return address(0);
+        }
+        if (uint256(s) > SECP256K1_HALF_ORDER) {
+            return address(0);
         }
 
         bytes32 ethHash =

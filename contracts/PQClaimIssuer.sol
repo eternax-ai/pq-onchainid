@@ -151,28 +151,19 @@ contract PQClaimIssuer is IPQClaimIssuer {
             return _ecdsaClaimKeys[recovered];
         }
 
-        // PQ / explicit: abi.encode(scheme, pubkey, rawSig)
+        // PQ: abi.encode(scheme, pubkey, rawSig). ECDSA has only the 65-byte form above.
         (uint256 scheme, bytes memory pubkey, bytes memory rawSig) =
             abi.decode(sig, (uint256, bytes, bytes));
+
+        // Revocation is keyed on the signature bytes, and abi.decode also accepts
+        // trailing bytes and other offsets, so only the canonical encoding counts.
+        if (keccak256(sig) != keccak256(abi.encode(scheme, pubkey, rawSig))) {
+            return false;
+        }
 
         bytes32 keyId = SignatureSchemes.keyId(scheme, pubkey);
         if (!_claimKeys[keyId]) {
             return false;
-        }
-
-        if (scheme == SignatureSchemes.ECDSA) {
-            if (!ecdsaEnabled) {
-                return false;
-            }
-            address recovered = PQVerifier.recoverEcdsa(digest, rawSig);
-            if (recovered == address(0) || pubkey.length != 20) {
-                return false;
-            }
-            address expected;
-            assembly ("memory-safe") {
-                expected := shr(96, mload(add(pubkey, 32)))
-            }
-            return recovered == expected;
         }
 
         if (scheme == SignatureSchemes.SLH_DSA_SHAKE_128S) {
